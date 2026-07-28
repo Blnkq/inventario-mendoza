@@ -15,39 +15,60 @@ def conectar_db():
 st.markdown("### 📋 Auditoría e Historial Analítico de Movimientos (Taller y Pozo)")
 st.markdown("Registro unificado de folios oficiales de despacho (FOR-001) y retornos de herramientas (FOR-002).")
 
-# Consulta avanzada que jala los datos reales del historial
+# 1. ASEGURAR QUE LA TABLA EXISTE
 with conectar_db() as conn:
-    df_hist = pd.read_sql_query('''
-        SELECT h.fecha_hora AS [FECHA/HORA], 
-               h.id_pieza AS [No SERIE], 
-               i.descripcion AS [HERRAMIENTA], 
-               h.tipo_movimiento AS [TIPO MOVIMIENTO], 
-               h.cantidad AS [CANTIDAD], 
-               h.operador AS [RESPONSABLE TÉCNICO], 
-               h.observaciones AS [DETALLES / OBSERVACIONES]
-        FROM historial h 
-        JOIN inventario i ON h.id_pieza = i.id 
-        ORDER BY h.id_historial DESC
-    ''', conn)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS historial (
+            id_historial INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_hora TEXT,
+            id_pieza TEXT,
+            tipo_movimiento TEXT,
+            cantidad INTEGER,
+            operador TEXT,
+            observaciones TEXT
+        )
+    ''')
+    conn.commit()
+
+# 2. CONSULTAR DATOS (Sin forzar el nombre de la columna en el ORDER BY para evitar errores)
+try:
+    with conectar_db() as conn:
+        df_hist = pd.read_sql_query('''
+            SELECT h.fecha_hora AS [FECHA/HORA], 
+                   h.id_pieza AS [No SERIE], 
+                   i.descripcion AS [HERRAMIENTA], 
+                   h.tipo_movimiento AS [TIPO MOVIMIENTO], 
+                   h.cantidad AS [CANTIDAD], 
+                   h.operador AS [RESPONSABLE TÉCNICO], 
+                   h.observaciones AS [DETALLES / OBSERVACIONES]
+            FROM historial h 
+            JOIN inventario i ON h.id_pieza = i.id 
+        ''', conn)
+        
+        # Ordenar desde Pandas para evitar errores de sintaxis o nombres de columnas en SQLite
+        if not df_hist.empty:
+            df_hist = df_hist.iloc[::-1].reset_index(drop=True)
+
+except Exception as e:
+    df_hist = pd.DataFrame()
 
 if df_hist.empty:
     st.info("No se registran movimientos (entradas o salidas) en el sistema actualmente.")
 else:
-    # Función visual para pintar las filas: Verde si entra herramienta, Amarillo si sale
+    # Función visual para pintar las filas
     def colorear_movimientos(row):
         styles = [''] * len(row)
         if 'Entrada' in str(row['TIPO MOVIMIENTO']):
-            # Color verde tenue para ingresos al taller
             styles[3] = 'background-color: #e6ffed; color: #00802b; font-weight: bold;'
         elif 'Salida' in str(row['TIPO MOVIMIENTO']):
-            # Color amarillo/naranja tenue para despachos a pozo
             styles[3] = 'background-color: #fff9db; color: #9e7d0a; font-weight: bold;'
         return styles
 
-    # Mostrar la tabla estilizada en pantalla
+    # Mostrar la tabla en pantalla
     st.dataframe(df_hist.style.apply(colorear_movimientos, axis=1), use_container_width=True, hide_index=True)
     
-    # Botón para descargar el reporte a Excel para auditorías
+    # Botón de descarga
     towrite_h = io.BytesIO()
     df_hist.to_excel(towrite_h, index=False, header=True, sheet_name='Historial_General')
     towrite_h.seek(0)
