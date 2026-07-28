@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 import io
+import os
 
 # Importaciones de ReportLab para la remisión oficial PDF de Retorno
 from reportlab.lib.pagesizes import letter
@@ -13,7 +14,9 @@ from reportlab.lib import colors
 st.set_page_config(page_title="MSH-TT-FOR-002 - Retorno de Herramientas", layout="wide")
 
 def conectar_db(): 
-    return sqlite3.connect('inventario_thrutubing.db')
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
+    return sqlite3.connect(db_path)
 
 # Inicializar tablas si no existen
 with conectar_db() as conn:
