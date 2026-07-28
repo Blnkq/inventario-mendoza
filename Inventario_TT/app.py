@@ -16,9 +16,12 @@ st.markdown("""<style>
     .metric-value { font-size: 28px; color: #1e3d59; font-weight: bold; }
 </style>""", unsafe_allow_html=True)
 
-def conectar_db():
-    return sqlite3.connect('inventario_thrutubing.db')
+import os
 
+def conectar_db():
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
+    return sqlite3.connect(db_path)
 # Carga de datos base
 with conectar_db() as conn:
     df_inv = pd.read_sql_query("SELECT id AS [No SERIE], descripcion AS [HERRAMIENTA], stock AS [STOCK], ubicacion AS [UBICACIÓN], categoria AS [CATEGORÍA] FROM inventario", conn)
