@@ -6,8 +6,25 @@ from datetime import datetime
 
 st.set_page_config(page_title="Panel de Administración", layout="wide")
 
+# 1. DEFINICIÓN DE CONEXIÓN CON RUTA ABSOLUTA
 def conectar_db(): 
-    return sqlite3.connect('inventario_thrutubing.db')
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
+    return sqlite3.connect(db_path)
+
+# 2. ASEGURAR QUE LA TABLA MAESTRA EXISTE
+with conectar_db() as conn:
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inventario (
+            id TEXT PRIMARY KEY,
+            descripcion TEXT,
+            cantidad INTEGER DEFAULT 1,
+            ubicacion TEXT DEFAULT 'Taller Principal',
+            categoria TEXT
+        )
+    ''')
+    conn.commit()
 
 st.title("Mendoza Servicios e Herramientas")
 st.subheader("⚙️ Panel de Administración y Control de Base de Datos")
@@ -41,15 +58,6 @@ if clave_acceso == "MENDOZA2026":
                 
                 with conectar_db() as conn:
                     cursor = conn.cursor()
-                    cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS inventario (
-                            id TEXT PRIMARY KEY,
-                            descripcion TEXT,
-                            cantidad INTEGER DEFAULT 1,
-                            ubicacion TEXT DEFAULT 'Taller Principal',
-                            categoria TEXT
-                        )
-                    ''')
                     
                     for sheet in excel_file.sheet_names:
                         if "INDICE" in sheet.upper() or "ÍNDICE" in sheet.upper(): 
@@ -94,8 +102,11 @@ if clave_acceso == "MENDOZA2026":
         st.markdown("#### 🗑️ Dar de Baja Herramienta del Inventario")
         st.caption("Módulo de descarte formal con trazabilidad de usuario y motivo técnico.")
         
-        with conectar_db() as conn:
-            df_piezas_activas = pd.read_sql_query("SELECT id, descripcion, categoria, ubicacion FROM inventario", conn)
+        try:
+            with conectar_db() as conn:
+                df_piezas_activas = pd.read_sql_query("SELECT id, descripcion, categoria, ubicacion FROM inventario", conn)
+        except Exception:
+            df_piezas_activas = pd.DataFrame()
             
         if df_piezas_activas.empty:
             st.info("No hay herramientas registradas en la base de datos.")
@@ -113,7 +124,6 @@ if clave_acceso == "MENDOZA2026":
             st.markdown("---")
             col_b1, col_b2 = st.columns(2)
             
-            # Formato de fecha para la auditoría
             fecha_hora_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
             
             with col_b1:
@@ -151,7 +161,10 @@ if clave_acceso == "MENDOZA2026":
         st.write("Proteja su información descargando copias locales de la base de datos o reportes ejecutivos en Excel.")
         
         col_res1, col_res2 = st.columns(2)
-        db_file = "inventario_thrutubing.db"
+        
+        # Obtener ruta absoluta de la base de datos para descarga
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        db_file = os.path.join(base_dir, "inventario_thrutubing.db")
         
         with col_res1:
             st.markdown("##### 📦 Copia de Seguridad de Base de Datos (.db)")
