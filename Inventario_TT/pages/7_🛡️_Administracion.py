@@ -14,7 +14,7 @@ def conectar_db():
     db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
     return sqlite3.connect(db_path)
 
-# 2. ASEGURAR QUE LA TABLA MAESTRA EXISTE
+# 2. ASEGURAR QUE LA TABLA MAESTRA EXISTE Y TIENE TODAS SUS COLUMNAS
 with conectar_db() as conn:
     cursor = conn.cursor()
     cursor.execute('''
@@ -28,6 +28,13 @@ with conectar_db() as conn:
             stock INTEGER DEFAULT 1
         )
     ''')
+    # Verificar si faltan columnas acumulativas por esquemas anteriores
+    cursor.execute("PRAGMA table_info(inventario)")
+    cols = [col[1] for col in cursor.fetchall()]
+    if 'horas_uso' not in cols:
+        cursor.execute("ALTER TABLE inventario ADD COLUMN horas_uso REAL DEFAULT 0.0")
+    if 'stock' not in cols:
+        cursor.execute("ALTER TABLE inventario ADD COLUMN stock INTEGER DEFAULT 1")
     conn.commit()
 
 st.title("Mendoza Servicios e Herramientas")
@@ -40,81 +47,12 @@ clave_acceso = st.text_input("Contraseña del Administrador:", type="password")
 if clave_acceso == "MENDOZA2026":
     st.success("🔒 Acceso Autorizado.")
     
-    tab_reg, tab_carga, tab_bajas, tab_respaldos = st.tabs([
-        "🏷️ Regularizar Piezas y Generar QR",
+    tab_carga, tab_reg, tab_bajas, tab_respaldos = st.tabs([
         "📥 Carga Masiva (Excel Inteligente)", 
+        "🏷️ Regularizar Piezas y Generar QR",
         "🗑️ Bajas e Inventario Dañado",
         "💾 Respaldos y Exportación"
     ])
-    
-    # ---------------------------------------------------------
-    # PESTAÑA 0: REGULARIZACIÓN DE DATOS Y GENERADOR DE QR
-    # ---------------------------------------------------------
-    with tab_reg:
-        st.markdown("#### 🛠️ Regularizar Estatus de Herramientas en Campo y Generar QR")
-        st.caption("Use este módulo temporal para ajustar las horas pasadas, pozos donde se encuentran las herramientas y descargar sus etiquetas QR.")
-        
-        with conectar_db() as conn:
-            df_inv_reg = pd.read_sql_query("SELECT id, descripcion, ubicacion, stock, COALESCE(horas_uso, 0.0) AS horas_uso FROM inventario", conn)
-            
-        if df_inv_reg.empty:
-            st.info("No hay herramientas registradas para regularizar.")
-        else:
-            opciones_reg = [f"{row['id']} - {row['descripcion']}" for _, row in df_inv_reg.iterrows()]
-            pieza_sel_reg = st.selectbox("Seleccione el No. de Serie de la herramienta:", opciones_reg)
-            serie_reg = pieza_sel_reg.split(" - ")[0]
-            
-            info_pieza = df_inv_reg[df_inv_reg["id"] == serie_reg].iloc[0]
-            
-            col_r1, col_r2 = st.columns(2)
-            
-            with col_r1:
-                st.markdown("##### **1. Actualizar Datos Iniciales / Reales**")
-                
-                estado_fisico = st.radio("Ubicación Operativa Actual:", ["En Taller Principal", "En Pozo / Trabajo Exterior"], 
-                                         index=0 if info_pieza['stock'] == 1 else 1)
-                
-                if estado_fisico == "En Taller Principal":
-                    nueva_ubicacion = "Taller Principal"
-                    nuevo_stock = 1
-                else:
-                    pozo_actual = st.text_input("Pozo / Campo donde se encuentra instalada:", value="POZO: 910 (5 PRESIDENTES)")
-                    nueva_ubicacion = pozo_actual.strip()
-                    nuevo_stock = 0
-                    
-                nuevas_hrs = st.number_input("Horas de Uso Acumuladas Previas (Históricas):", min_value=0.0, step=0.5, value=float(info_pieza['horas_uso']))
-                
-                if st.button("💾 Guardar Actualización de Estatus", type="primary", use_container_width=True):
-                    with conectar_db() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE inventario SET ubicacion = ?, stock = ?, horas_uso = ? WHERE id = ?", 
-                                       (nueva_ubicacion, nuevo_stock, nuevas_hrs, serie_reg))
-                        conn.commit()
-                    st.success(f"✔️ Herramienta {serie_reg} actualizada correctamente. Ubicación: '{nueva_ubicacion}' | Horas: {nuevas_hrs} hrs.")
-                    st.rerun()
-
-            with col_r2:
-                st.markdown("##### **2. Código QR Oficial de la Pieza**")
-                st.write(f"Serie codificada: **`{serie_reg}`**")
-                
-                qr = qrcode.QRCode(version=1, box_size=8, border=2)
-                qr.add_data(serie_reg)
-                qr.make(fit=True)
-                img_qr = qr.make_image(fill_color="#0f2a4a", back_color="white")
-                
-                buf = io.BytesIO()
-                img_qr.save(buf, format="PNG")
-                byte_im = buf.getvalue()
-                
-                st.image(byte_im, caption=f"QR listo para etiqueta de la serie: {serie_reg}", width=180)
-                
-                st.download_button(
-                    label=f"📥 Descargar QR ({serie_reg}.png)",
-                    data=byte_im,
-                    file_name=f"QR_{serie_reg}.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
 
     # ---------------------------------------------------------
     # PESTAÑA 1: CARGA MASIVA DE CATÁLOGO INTELIGENTE (EXCEL)
@@ -161,9 +99,7 @@ if clave_acceso == "MENDOZA2026":
                                 df_temp = pd.read_excel(archivo_subido, sheet_name=sheet, skiprows=skip)
                                 cols_upper = [str(c).upper().strip() for c in df_temp.columns]
                                 
-                                # Buscar columna para Serie
-                                c_s = [df_temp.columns[i] for i, c in enumerate(cols_upper) if "SERIE" in c or "NO." in c or "CODIGO" in c or "ID" == c]
-                                # Buscar columna para Descripción/Herramienta
+                                c_s = [df_temp.columns[i] for i, c in enumerate(cols_upper) if "SERIE" in c or "NO." in c or "CODIGO" in c or c == "ID"]
                                 c_h = [df_temp.columns[i] for i, c in enumerate(cols_upper) if "HERRAMIENTA" in c or "DESCRIPCION" in c or "NOMBRE" in c or "EQUIPO" in c]
 
                                 if c_s and c_h:
@@ -180,19 +116,18 @@ if clave_acceso == "MENDOZA2026":
                                 serie = str(row[col_serie]).strip()
                                 herramienta = str(row[col_herramienta]).strip()
                                 
-                                # Filtro de validez para omitir encabezados o celdas vacías
                                 if not serie or serie.upper() in ["NAN", "NONE", "N/A", ""] or "SISTEMA" in serie.upper() or len(serie) < 2:
                                     continue
                                 if not herramienta or herramienta.upper() in ["NAN", "NONE", "N/A", ""]:
                                     continue
 
-                                cursor.execute("INSERT OR REPLACE INTO inventario (id, descripcion, cantidad, ubicacion, categoria, stock) VALUES (?, ?, 1, 'Taller Principal', ?, 1)", (serie, herramienta, cat))
+                                cursor.execute("INSERT OR REPLACE INTO inventario (id, descripcion, cantidad, ubicacion, categoria, horas_uso, stock) VALUES (?, ?, 1, 'Taller Principal', ?, 0.0, 1)", (serie, herramienta, cat))
                                 conteo_hoja += 1
                                 piezas_cargadas += 1
 
                             resumen_hojas.append(f"🟢 **Pestaña '{sheet}'**: Se cargaron **{conteo_hoja}** piezas ({cat}).")
                         else:
-                            resumen_hojas.append(f"⚠️ **Pestaña '{sheet}'**: No se detectaron encabezados válidos de 'Serie' / 'Herramienta'.")
+                            resumen_hojas.append(f"⚠️ **Pestaña '{sheet}'**: No se detectaron encabezados válidos en esta hoja.")
 
                     conn.commit()
 
@@ -206,7 +141,82 @@ if clave_acceso == "MENDOZA2026":
                 st.error(f"❌ Error al procesar el archivo Excel: {e}")
 
     # ---------------------------------------------------------
-    # PESTAÑA 2: GESTIÓN DE BAJAS CON AUDITORÍA DE USUARIO
+    # PESTAÑA 2: REGULARIZACIÓN DE DATOS Y GENERADOR DE QR
+    # ---------------------------------------------------------
+    with tab_reg:
+        st.markdown("#### 🛠️ Regularizar Estatus de Herramientas en Campo y Generar QR")
+        st.caption("Use este módulo temporal para ajustar las horas pasadas, pozos donde se encuentran las herramientas y descargar sus etiquetas QR.")
+        
+        try:
+            with conectar_db() as conn:
+                df_inv_reg = pd.read_sql_query("SELECT id, descripcion, ubicacion, stock, COALESCE(horas_uso, 0.0) AS horas_uso FROM inventario", conn)
+        except Exception:
+            df_inv_reg = pd.DataFrame()
+            
+        if df_inv_reg.empty:
+            st.info("Aún no hay herramientas registradas para regularizar. Realice primero la **Carga Masiva** en la pestaña adyacente.")
+        else:
+            opciones_reg = [f"{row['id']} - {row['descripcion']}" for _, row in df_inv_reg.iterrows()]
+            pieza_sel_reg = st.selectbox("Seleccione el No. de Serie de la herramienta:", opciones_reg)
+            serie_reg = pieza_sel_reg.split(" - ")[0]
+            
+            info_pieza = df_inv_reg[df_inv_reg["id"] == serie_reg].iloc[0]
+            
+            col_r1, col_r2 = st.columns(2)
+            
+            with col_r1:
+                st.markdown("##### **1. Actualizar Datos Iniciales / Reales**")
+                
+                stock_val = info_pieza['stock'] if pd.notnull(info_pieza['stock']) else 1
+                hrs_val = float(info_pieza['horas_uso']) if pd.notnull(info_pieza['horas_uso']) else 0.0
+                
+                estado_fisico = st.radio("Ubicación Operativa Actual:", ["En Taller Principal", "En Pozo / Trabajo Exterior"], 
+                                         index=0 if stock_val == 1 else 1)
+                
+                if estado_fisico == "En Taller Principal":
+                    nueva_ubicacion = "Taller Principal"
+                    nuevo_stock = 1
+                else:
+                    pozo_actual = st.text_input("Pozo / Campo donde se encuentra instalada:", value="POZO: 910 (5 PRESIDENTES)")
+                    nueva_ubicacion = pozo_actual.strip()
+                    nuevo_stock = 0
+                    
+                nuevas_hrs = st.number_input("Horas de Uso Acumuladas Previas (Históricas):", min_value=0.0, step=0.5, value=hrs_val)
+                
+                if st.button("💾 Guardar Actualización de Estatus", type="primary", use_container_width=True):
+                    with conectar_db() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE inventario SET ubicacion = ?, stock = ?, horas_uso = ? WHERE id = ?", 
+                                       (nueva_ubicacion, nuevo_stock, nuevas_hrs, serie_reg))
+                        conn.commit()
+                    st.success(f"✔️ Herramienta {serie_reg} actualizada correctamente. Ubicación: '{nueva_ubicacion}' | Horas: {nuevas_hrs} hrs.")
+                    st.rerun()
+
+            with col_r2:
+                st.markdown("##### **2. Código QR Oficial de la Pieza**")
+                st.write(f"Serie codificada: **`{serie_reg}`**")
+                
+                qr = qrcode.QRCode(version=1, box_size=8, border=2)
+                qr.add_data(serie_reg)
+                qr.make(fit=True)
+                img_qr = qr.make_image(fill_color="#0f2a4a", back_color="white")
+                
+                buf = io.BytesIO()
+                img_qr.save(buf, format="PNG")
+                byte_im = buf.getvalue()
+                
+                st.image(byte_im, caption=f"QR listo para etiqueta de la serie: {serie_reg}", width=180)
+                
+                st.download_button(
+                    label=f"📥 Descargar QR ({serie_reg}.png)",
+                    data=byte_im,
+                    file_name=f"QR_{serie_reg}.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
+
+    # ---------------------------------------------------------
+    # PESTAÑA 3: GESTIÓN DE BAJAS CON AUDITORÍA DE USUARIO
     # ---------------------------------------------------------
     with tab_bajas:
         st.markdown("#### 🗑️ Dar de Baja Herramienta del Inventario")
@@ -264,7 +274,7 @@ if clave_acceso == "MENDOZA2026":
                         st.rerun()
 
     # ---------------------------------------------------------
-    # PESTAÑA 3: RESPALDOS LOCALES Y EXPORTACIÓN
+    # PESTAÑA 4: RESPALDOS LOCALES Y EXPORTACIÓN
     # ---------------------------------------------------------
     with tab_respaldos:
         st.markdown("#### 💾 Respaldos y Descargas Directas")
