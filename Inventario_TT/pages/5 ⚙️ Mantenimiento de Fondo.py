@@ -2,12 +2,15 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import os
 
 st.set_page_config(page_title="MSH-TT-FOR-009 - Mantenimiento de Fondo", layout="wide")
 
-# 1. DEFINICIÓN DE CONEXIÓN
+# 1. DEFINICIÓN DE CONEXIÓN CON RUTA ABSOLUTA DINÁMICA
 def conectar_db(): 
-    return sqlite3.connect('inventario_thrutubing.db')
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
+    return sqlite3.connect(db_path)
 
 # 2. CREAR TABLA BASE SI NO EXISTE
 with conectar_db() as conn:
@@ -148,4 +151,3 @@ else:
         st.info(f"Esta herramienta ({id_serie}) no cuenta con registros de mantenimiento previos en el sistema.")
     else:
         st.dataframe(df_hist_mtto, use_container_width=True, hide_index=True)
-        
