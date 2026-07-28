@@ -7,14 +7,15 @@ import os
 
 st.set_page_config(page_title="Control de Inventario - Mendoza", layout="wide", page_icon="🛠️")
 
-# Estilos globales
+# Estilos globales corregidos para un alto contraste en títulos y tarjetas
 st.markdown("""<style>
-    .stApp { background-color: #f8f9fa; font-family: 'Segoe UI', sans-serif; }
-    h1 { color: #1e3d59; font-weight: 700; }
-    h3 { color: #17b978; font-weight: 400; }
-    .metric-card { background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-left: 5px solid #1e3d59; margin-bottom: 20px; }
-    .metric-title { font-size: 14px; color: #6c757d; text-transform: uppercase; font-weight: bold; }
-    .metric-value { font-size: 28px; color: #1e3d59; font-weight: bold; }
+    .stApp { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
+    .main-title { color: #0f2a4a !important; font-size: 32px; font-weight: 800; margin-bottom: 0px; }
+    .sub-title { color: #17b978 !important; font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+    .section-header { color: #0f2a4a !important; font-size: 20px; font-weight: 700; margin-top: 15px; }
+    .metric-card { background-color: #ffffff; padding: 18px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.08); border-left: 6px solid #0f2a4a; margin-bottom: 15px; }
+    .metric-title { font-size: 13px; color: #555555; text-transform: uppercase; font-weight: 700; }
+    .metric-value { font-size: 30px; color: #0f2a4a; font-weight: bold; }
 </style>""", unsafe_allow_html=True)
 
 def conectar_db():
@@ -49,6 +50,11 @@ with conectar_db() as conn:
     ''')
     conn.commit()
 
+# Encabezados con HTML nativo para garantizar legibilidad
+st.markdown('<p class="main-title">Mendoza Servicios e Herramientas</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-title">Sistema Integral de Control de Inventario — Thru Tubing</p>', unsafe_allow_html=True)
+st.markdown("---")
+
 # Carga de datos base de forma segura
 try:
     with conectar_db() as conn:
@@ -58,22 +64,19 @@ except Exception:
     df_inv = pd.DataFrame(columns=["No SERIE", "HERRAMIENTA", "STOCK", "UBICACIÓN", "CATEGORÍA"])
     df_hist_total = pd.DataFrame()
 
-st.title("Mendoza Servicios e Herramientas")
-st.subheader("Sistema Integral de Control de Inventario — Thru Tubing")
-st.markdown("---")
-
 # KPIs principales
 c1, c2, c3, c4 = st.columns(4)
 with c1: 
-    st.markdown(f'<div class="metric-card"><div class="metric-title">Total de Equipos</div><div class="metric-value">{len(df_inv)}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card" style="border-left-color: #0f2a4a;"><div class="metric-title">Total de Equipos</div><div class="metric-value">{len(df_inv)}</div></div>', unsafe_allow_html=True)
 with c2: 
-    st.markdown(f'<div class="metric-card"><div class="metric-title">Piezas en Stock</div><div class="metric-value">{df_inv["STOCK"].sum() if not df_inv.empty else 0}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card" style="border-left-color: #28a745;"><div class="metric-title">Piezas en Stock</div><div class="metric-value">{df_inv["STOCK"].sum() if not df_inv.empty else 0}</div></div>', unsafe_allow_html=True)
 with c3: 
-    st.markdown(f'<div class="metric-card"><div class="metric-title">Movimientos Registrados</div><div class="metric-value">{len(df_hist_total)}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card" style="border-left-color: #ffc107;"><div class="metric-title">Movimientos Registrados</div><div class="metric-value">{len(df_hist_total)}</div></div>', unsafe_allow_html=True)
 with c4: 
-    st.markdown(f'<div class="metric-card"><div class="metric-title">Familias Activas</div><div class="metric-value">{df_inv["CATEGORÍA"].nunique() if not df_inv.empty else 0}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-card" style="border-left-color: #17a2b8;"><div class="metric-title">Familias Activas</div><div class="metric-value">{df_inv["CATEGORÍA"].nunique() if not df_inv.empty else 0}</div></div>', unsafe_allow_html=True)
 
-st.markdown("### 🗃️ Consulta de Existencias en Taller")
+st.markdown('<p class="section-header">🗃️ Consulta de Existencias en Taller</p>', unsafe_allow_html=True)
+
 categorias = ["Todas", "Conectores", "Trompos difusores", "Combinaciones", "Herramientas varias", "Herramientas de pesca", "Molinos y zapatas", "Centradores y cortatubos", "Motores", "Martillos de pesca"]
 cat_seleccionada = st.selectbox("Filtrar por Familia:", categorias)
 
