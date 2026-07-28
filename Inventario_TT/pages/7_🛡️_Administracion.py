@@ -14,7 +14,7 @@ def conectar_db():
     db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
     return sqlite3.connect(db_path)
 
-# 2. ASEGURAR QUE LA TABLA MAESTRA EXISTE Y TIENE TODAS SUS COLUMNAS
+# 2. ASEGURAR QUE LA TABLA MAESTRA EXISTE
 with conectar_db() as conn:
     cursor = conn.cursor()
     cursor.execute('''
@@ -28,16 +28,6 @@ with conectar_db() as conn:
             stock INTEGER DEFAULT 1
         )
     ''')
-    # Verificar y agregar columnas si la tabla venía de una versión anterior
-    cursor.execute("PRAGMA table_info(inventario)")
-    cols = [col[1] for col in cursor.fetchall()]
-    
-    if 'cantidad' not in cols:
-        cursor.execute("ALTER TABLE inventario ADD COLUMN cantidad INTEGER DEFAULT 1")
-    if 'horas_uso' not in cols:
-        cursor.execute("ALTER TABLE inventario ADD COLUMN horas_uso REAL DEFAULT 0.0")
-    if 'stock' not in cols:
-        cursor.execute("ALTER TABLE inventario ADD COLUMN stock INTEGER DEFAULT 1")
     conn.commit()
 
 st.title("Mendoza Servicios e Herramientas")
@@ -51,22 +41,22 @@ if clave_acceso == "MENDOZA2026":
     st.success("🔒 Acceso Autorizado.")
     
     tab_carga, tab_reg, tab_bajas, tab_respaldos = st.tabs([
-        "📥 Carga Masiva (Excel Inteligente)", 
+        "📥 Carga Masiva (Excel Universal)", 
         "🏷️ Regularizar Piezas y Generar QR",
         "🗑️ Bajas e Inventario Dañado",
         "💾 Respaldos y Exportación"
     ])
 
     # ---------------------------------------------------------
-    # PESTAÑA 1: CARGA MASIVA DE CATÁLOGO INTELIGENTE (EXCEL)
+    # PESTAÑA 1: CARGA MASIVA DE CATÁLOGO UNIVERSAL
     # ---------------------------------------------------------
     with tab_carga:
         st.markdown("#### 📥 Cargar / Actualizar Catálogo Maestro desde Excel")
-        st.caption("Suba su archivo oficial de inventario para procesar de forma automática todas las pestañas y herramientas.")
+        st.caption("Suba el archivo de inventario (`.xlsx` o `.xlsm`). El sistema escaneará todas las pestañas automáticamente.")
         
-        archivo_subido = st.file_uploader("Subir Archivo Excel Mendoza (.xlsx / .xlsm):", type=["xlsx", "xlsm"])
+        archivo_subido = st.file_uploader("Subir Archivo Excel Mendoza:", type=["xlsx", "xlsm"])
         
-        if archivo_subido is not None and st.button("🚀 Iniciar Carga Masiva Inteligente", use_container_width=True):
+        if archivo_subido is not None and st.button("🚀 Iniciar Carga Masiva Universal", use_container_width=True):
             try:
                 excel_file = pd.ExcelFile(archivo_subido)
                 piezas_cargadas = 0
@@ -92,53 +82,46 @@ if clave_acceso == "MENDOZA2026":
                         elif "MARTILLO" in sheet_upper: cat = "Martillos de pesca"
                         else: cat = "Herramientas varias"
 
-                        # Intentar leer probando diferentes saltos de encabezado (filas 0 a 5)
-                        df_sheet = None
-                        col_serie = None
-                        col_herramienta = None
+                        # Leer toda la hoja sin asumir nombres de columna predefinidos
+                        df_raw = pd.read_excel(archivo_subido, sheet_name=sheet, header=None)
+                        conteo_hoja = 0
 
-                        for skip in range(6):
-                            try:
-                                df_temp = pd.read_excel(archivo_subido, sheet_name=sheet, skiprows=skip)
-                                cols_upper = [str(c).upper().strip() for c in df_temp.columns]
-                                
-                                c_s = [df_temp.columns[i] for i, c in enumerate(cols_upper) if "SERIE" in c or "NO." in c or "CODIGO" in c or c == "ID"]
-                                c_h = [df_temp.columns[i] for i, c in enumerate(cols_upper) if "HERRAMIENTA" in c or "DESCRIPCION" in c or "NOMBRE" in c or "EQUIPO" in c]
+                        # Recorrer todas las filas buscando la columna con números de serie y descripción
+                        for row_idx, row in df_raw.iterrows():
+                            row_vals = [str(val).strip() for val in row.values if pd.notnull(val)]
+                            
+                            # Si la fila tiene al menos 2 celdas con texto
+                            if len(row_vals) >= 2:
+                                val_s = row_vals[0]
+                                val_h = row_vals[1]
 
-                                if c_s and c_h:
-                                    df_sheet = df_temp
-                                    col_serie = c_s[0]
-                                    col_herramienta = c_h[0]
-                                    break
-                            except Exception:
-                                pass
-
-                        if df_sheet is not None and col_serie and col_herramienta:
-                            conteo_hoja = 0
-                            for _, row in df_sheet.iterrows():
-                                serie = str(row[col_serie]).strip()
-                                herramienta = str(row[col_herramienta]).strip()
-                                
-                                if not serie or serie.upper() in ["NAN", "NONE", "N/A", ""] or "SISTEMA" in serie.upper() or len(serie) < 2:
+                                # Descartar encabezados comunes
+                                if any(kw in val_s.upper() for kw in ["SERIE", "NO.", "CODIGO", "ID", "SISTEMA", "MENDOZA", "S.A.", "FORMATO", "PÁGINA", "FECHA"]):
                                     continue
-                                if not herramienta or herramienta.upper() in ["NAN", "NONE", "N/A", ""]:
+                                if any(kw in val_h.upper() for kw in ["HERRAMIENTA", "DESCRIPCIÓN", "DESCRIPCION", "CANTIDAD", "UBICACIÓN"]):
                                     continue
+                                
+                                # Si la serie tiene una longitud lógica
+                                if len(val_s) >= 2 and val_s.upper() not in ["NAN", "NONE", "N/A"]:
+                                    cursor.execute('''
+                                        INSERT OR REPLACE INTO inventario (id, descripcion, cantidad, ubicacion, categoria, horas_uso, stock) 
+                                        VALUES (?, ?, 1, 'Taller Principal', ?, 0.0, 1)
+                                    ''', (val_s, val_h, cat))
+                                    conteo_hoja += 1
+                                    piezas_cargadas += 1
 
-                                cursor.execute('''
-                                    INSERT OR REPLACE INTO inventario (id, descripcion, cantidad, ubicacion, categoria, horas_uso, stock) 
-                                    VALUES (?, ?, 1, 'Taller Principal', ?, 0.0, 1)
-                                ''', (serie, herramienta, cat))
-                                conteo_hoja += 1
-                                piezas_cargadas += 1
-
+                        if conteo_hoja > 0:
                             resumen_hojas.append(f"🟢 **Pestaña '{sheet}'**: Se cargaron **{conteo_hoja}** piezas ({cat}).")
                         else:
-                            resumen_hojas.append(f"⚠️ **Pestaña '{sheet}'**: No se detectaron encabezados válidos en esta hoja.")
+                            resumen_hojas.append(f"⚠️ **Pestaña '{sheet}'**: No se detectaron registros válidos.")
 
                     conn.commit()
 
-                st.success(f"🎉 ¡Proceso terminado! Se registraron en total **{piezas_cargadas}** herramientas en la base de datos.")
-                
+                if piezas_cargadas > 0:
+                    st.success(f"🎉 ¡Éxito! Se registraron **{piezas_cargadas}** herramientas en la base de datos.")
+                else:
+                    st.warning("⚠️ El proceso finalizó pero no se detectaron filas válidas. Revisa el resumen por pestaña abajo.")
+
                 with st.expander("📋 Ver Detalle por Pestaña del Excel", expanded=True):
                     for msg in resumen_hojas:
                         st.markdown(msg)
@@ -151,8 +134,6 @@ if clave_acceso == "MENDOZA2026":
     # ---------------------------------------------------------
     with tab_reg:
         st.markdown("#### 🛠️ Regularizar Estatus de Herramientas en Campo y Generar QR")
-        st.caption("Use este módulo temporal para ajustar las horas pasadas, pozos donde se encuentran las herramientas y descargar sus etiquetas QR.")
-        
         try:
             with conectar_db() as conn:
                 df_inv_reg = pd.read_sql_query("SELECT id, descripcion, ubicacion, stock, COALESCE(horas_uso, 0.0) AS horas_uso FROM inventario", conn)
@@ -160,7 +141,7 @@ if clave_acceso == "MENDOZA2026":
             df_inv_reg = pd.DataFrame()
             
         if df_inv_reg.empty:
-            st.info("Aún no hay herramientas registradas para regularizar. Realice primero la **Carga Masiva** en la pestaña adyacente.")
+            st.info("Aún no hay herramientas registradas en la base de datos.")
         else:
             opciones_reg = [f"{row['id']} - {row['descripcion']}" for _, row in df_inv_reg.iterrows()]
             pieza_sel_reg = st.selectbox("Seleccione el No. de Serie de la herramienta:", opciones_reg)
@@ -222,12 +203,10 @@ if clave_acceso == "MENDOZA2026":
                 )
 
     # ---------------------------------------------------------
-    # PESTAÑA 3: GESTIÓN DE BAJAS CON AUDITORÍA DE USUARIO
+    # PESTAÑA 3: GESTIÓN DE BAJAS
     # ---------------------------------------------------------
     with tab_bajas:
         st.markdown("#### 🗑️ Dar de Baja Herramienta del Inventario")
-        st.caption("Módulo de descarte formal con trazabilidad de usuario y motivo técnico.")
-        
         try:
             with conectar_db() as conn:
                 df_piezas_activas = pd.read_sql_query("SELECT id, descripcion, categoria, ubicacion FROM inventario", conn)
@@ -239,60 +218,53 @@ if clave_acceso == "MENDOZA2026":
         else:
             c_u1, c_u2 = st.columns(2)
             with c_u1:
-                usuario_admin = st.text_input("👤 Nombre de Usuario / Ingeniero que autoriza la baja:", placeholder="Ej. Ing. David / Ing. Mosqueda").strip()
+                usuario_admin = st.text_input("👤 Nombre de Usuario / Ingeniero que autoriza la baja:", placeholder="Ej. Ing. David").strip()
             with c_u2:
                 opciones_baja = [f"{row['id']} - {row['descripcion']} ({row['categoria']})" for _, row in df_piezas_activas.iterrows()]
                 pieza_a_borrar = st.selectbox("🔧 Seleccione la herramienta a procesar:", opciones_baja)
             
             serie_baja = pieza_a_borrar.split(" - ")[0]
-            motivo_baja = st.text_input("📝 Motivo técnico de la baja (Ej. Rosca barrida, Fisura NDT, Límite de horas):", value="Vida útil finalizada").strip()
+            motivo_baja = st.text_input("📝 Motivo técnico de la baja:", value="Vida útil finalizada").strip()
             
-            st.markdown("---")
             col_b1, col_b2 = st.columns(2)
-            
             fecha_hora_actual = datetime.now().strftime("%Y-%m-%d %H:%M")
             
             with col_b1:
-                if st.button("⚠️ Marcar como 'DADA DE BAJA' (Conservar Histórico)", use_container_width=True):
-                    if not usuario_admin:
-                        st.error("⛔ ERROR: Debe ingresar su Nombre de Usuario para firmar la baja.")
-                    elif not motivo_baja:
-                        st.error("⛔ ERROR: Debe ingresar el motivo técnico de la baja.")
+                if st.button("⚠️ Marcar como 'DADA DE BAJA'", use_container_width=True):
+                    if not usuario_admin or not motivo_baja:
+                        st.error("⛔ Complete el usuario y motivo técnico.")
                     else:
                         registro_auditoria = f"BAJA: {motivo_baja} | Autorizó: {usuario_admin} ({fecha_hora_actual})"
                         with conectar_db() as conn:
                             cursor = conn.cursor()
                             cursor.execute("UPDATE inventario SET ubicacion = ?, stock = 0 WHERE id = ?", (registro_auditoria, serie_baja))
                             conn.commit()
-                        st.warning(f"⚠️ La herramienta {serie_baja} quedó registrada como DADA DE BAJA por {usuario_admin}.")
+                        st.warning(f"⚠️ Herramienta {serie_baja} dada de baja.")
                         st.rerun()
 
             with col_b2:
-                if st.button("🚨 ELIMINAR DEFINITIVAMENTE del Sistema", type="primary", use_container_width=True):
+                if st.button("🚨 ELIMINAR DEFINITIVAMENTE", type="primary", use_container_width=True):
                     if not usuario_admin:
-                        st.error("⛔ ERROR: Debe ingresar su Nombre de Usuario para confirmar la eliminación.")
+                        st.error("⛔ Ingrese usuario para confirmar.")
                     else:
                         with conectar_db() as conn:
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM inventario WHERE id = ?", (serie_baja,))
                             conn.commit()
-                        st.success(f"🗑️ La herramienta {serie_baja} fue eliminada permanentemente por {usuario_admin}.")
+                        st.success(f"🗑️ Herramienta {serie_baja} eliminada.")
                         st.rerun()
 
     # ---------------------------------------------------------
-    # PESTAÑA 4: RESPALDOS LOCALES Y EXPORTACIÓN
+    # PESTAÑA 4: RESPALDOS Y DESCARGA DE BD
     # ---------------------------------------------------------
     with tab_respaldos:
-        st.markdown("#### 💾 Respaldos y Descargas Directas")
-        st.write("Proteja su información descargando copias locales de la base de datos o reportes ejecutivos en Excel.")
-        
+        st.markdown("#### 💾 Respaldos y Copias de Seguridad")
         col_res1, col_res2 = st.columns(2)
-        
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         db_file = os.path.join(base_dir, "inventario_thrutubing.db")
         
         with col_res1:
-            st.markdown("##### 📦 Copia de Seguridad de Base de Datos (.db)")
+            st.markdown("##### 📦 Copia de Seguridad Base de Datos (.db)")
             if os.path.exists(db_file):
                 with open(db_file, "rb") as f:
                     st.download_button(
@@ -303,21 +275,19 @@ if clave_acceso == "MENDOZA2026":
                         use_container_width=True
                     )
             else:
-                st.warning("⚠️ No se encontró la base de datos local.")
+                st.warning("⚠️ No se encontró la base de datos.")
 
         with col_res2:
-            st.markdown("##### 📊 Reporte Maestro Consolidado (.xlsx)")
+            st.markdown("##### 📊 Exportar a Excel (.xlsx)")
             if st.button("📊 Generar Excel de Inventario", use_container_width=True):
                 try:
                     with conectar_db() as conn:
                         df_inv = pd.read_sql_query("SELECT * FROM inventario", conn)
-                    
                     excel_out = f"Inventario_Maestro_Mendoza_{datetime.now().strftime('%Y%m%d')}.xlsx"
                     df_inv.to_excel(excel_out, index=False)
-                    
                     with open(excel_out, "rb") as f_ex:
                         st.download_button(
-                            label="📥 Descargar Reporte Maestro Excel",
+                            label="📥 Descargar Reporte Excel",
                             data=f_ex,
                             file_name=excel_out,
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
