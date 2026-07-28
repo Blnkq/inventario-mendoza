@@ -3,10 +3,11 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 import io
+import os
 
 st.set_page_config(page_title="Control de Inventario - Mendoza", layout="wide", page_icon="🛠️")
 
-# Estilos globales (Se mantienen en cada página para consistencia corporativa)
+# Estilos globales
 st.markdown("""<style>
     .stApp { background-color: #f8f9fa; font-family: 'Segoe UI', sans-serif; }
     h1 { color: #1e3d59; font-weight: 700; }
@@ -16,16 +17,46 @@ st.markdown("""<style>
     .metric-value { font-size: 28px; color: #1e3d59; font-weight: bold; }
 </style>""", unsafe_allow_html=True)
 
-import os
-
 def conectar_db():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
     return sqlite3.connect(db_path)
-# Carga de datos base
+
+# Inicializar tablas base si no existen
 with conectar_db() as conn:
-    df_inv = pd.read_sql_query("SELECT id AS [No SERIE], descripcion AS [HERRAMIENTA], stock AS [STOCK], ubicacion AS [UBICACIÓN], categoria AS [CATEGORÍA] FROM inventario", conn)
-    df_hist_total = pd.read_sql_query("SELECT id_movimiento FROM historial", conn)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inventario (
+            id TEXT PRIMARY KEY,
+            descripcion TEXT,
+            cantidad INTEGER DEFAULT 1,
+            ubicacion TEXT DEFAULT 'Taller Principal',
+            categoria TEXT,
+            horas_uso REAL DEFAULT 0.0,
+            stock INTEGER DEFAULT 1
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS historial (
+            id_historial INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_hora TEXT,
+            id_pieza TEXT,
+            tipo_movimiento TEXT,
+            cantidad INTEGER,
+            operador TEXT,
+            observaciones TEXT
+        )
+    ''')
+    conn.commit()
+
+# Carga de datos base de forma segura
+try:
+    with conectar_db() as conn:
+        df_inv = pd.read_sql_query("SELECT id AS [No SERIE], descripcion AS [HERRAMIENTA], stock AS [STOCK], ubicacion AS [UBICACIÓN], categoria AS [CATEGORÍA] FROM inventario", conn)
+        df_hist_total = pd.read_sql_query("SELECT id_historial FROM historial", conn)
+except Exception:
+    df_inv = pd.DataFrame(columns=["No SERIE", "HERRAMIENTA", "STOCK", "UBICACIÓN", "CATEGORÍA"])
+    df_hist_total = pd.DataFrame()
 
 st.title("Mendoza Servicios e Herramientas")
 st.subheader("Sistema Integral de Control de Inventario — Thru Tubing")
@@ -33,10 +64,14 @@ st.markdown("---")
 
 # KPIs principales
 c1, c2, c3, c4 = st.columns(4)
-with c1: st.markdown(f'<div class="metric-card"><div class="metric-title">Total de Equipos</div><div class="metric-value">{len(df_inv)}</div></div>', unsafe_allow_html=True)
-with c2: st.markdown(f'<div class="metric-card"><div class="metric-title">Piezas en Stock</div><div class="metric-value">{df_inv["STOCK"].sum() if not df_inv.empty else 0}</div></div>', unsafe_allow_html=True)
-with c3: st.markdown(f'<div class="metric-card"><div class="metric-title">Movimientos Registrados</div><div class="metric-value">{len(df_hist_total)}</div></div>', unsafe_allow_html=True)
-with c4: st.markdown(f'<div class="metric-card"><div class="metric-title">Familias Activas</div><div class="metric-value">{df_inv["CATEGORÍA"].nunique() if not df_inv.empty else 0}</div></div>', unsafe_allow_html=True)
+with c1: 
+    st.markdown(f'<div class="metric-card"><div class="metric-title">Total de Equipos</div><div class="metric-value">{len(df_inv)}</div></div>', unsafe_allow_html=True)
+with c2: 
+    st.markdown(f'<div class="metric-card"><div class="metric-title">Piezas en Stock</div><div class="metric-value">{df_inv["STOCK"].sum() if not df_inv.empty else 0}</div></div>', unsafe_allow_html=True)
+with c3: 
+    st.markdown(f'<div class="metric-card"><div class="metric-title">Movimientos Registrados</div><div class="metric-value">{len(df_hist_total)}</div></div>', unsafe_allow_html=True)
+with c4: 
+    st.markdown(f'<div class="metric-card"><div class="metric-title">Familias Activas</div><div class="metric-value">{df_inv["CATEGORÍA"].nunique() if not df_inv.empty else 0}</div></div>', unsafe_allow_html=True)
 
 st.markdown("### 🗃️ Consulta de Existencias en Taller")
 categorias = ["Todas", "Conectores", "Trompos difusores", "Combinaciones", "Herramientas varias", "Herramientas de pesca", "Molinos y zapatas", "Centradores y cortatubos", "Motores", "Martillos de pesca"]
@@ -49,4 +84,9 @@ if not df_mostrar.empty:
     towrite = io.BytesIO()
     df_mostrar.to_excel(towrite, index=False, header=True, sheet_name='Inventario')
     towrite.seek(0)
-    st.download_button(label="📥 Exportar Vista Actual a Excel", data=towrite, file_name=f"Inventario_Mendoza_{datetime.now().strftime('%Y%m%d')}.xlsx", mime="application/vnd.ms-excel")
+    st.download_button(
+        label="📥 Exportar Vista Actual a Excel", 
+        data=towrite, 
+        file_name=f"Inventario_Mendoza_{datetime.now().strftime('%Y%m%d')}.xlsx", 
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
