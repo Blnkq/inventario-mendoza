@@ -28,6 +28,16 @@ with conectar_db() as conn:
             stock INTEGER DEFAULT 1
         )
     ''')
+    
+    # Asegurar columnas si vienen de versiones previas
+    cursor.execute("PRAGMA table_info(inventario)")
+    cols = [col[1] for col in cursor.fetchall()]
+    if 'cantidad' not in cols:
+        cursor.execute("ALTER TABLE inventario ADD COLUMN cantidad INTEGER DEFAULT 1")
+    if 'horas_uso' not in cols:
+        cursor.execute("ALTER TABLE inventario ADD COLUMN horas_uso REAL DEFAULT 0.0")
+    if 'stock' not in cols:
+        cursor.execute("ALTER TABLE inventario ADD COLUMN stock INTEGER DEFAULT 1")
     conn.commit()
 
 st.title("Mendoza Servicios e Herramientas")
@@ -41,22 +51,22 @@ if clave_acceso == "MENDOZA2026":
     st.success("🔒 Acceso Autorizado.")
     
     tab_carga, tab_reg, tab_bajas, tab_respaldos = st.tabs([
-        "📥 Carga Masiva (Excel Universal)", 
+        "📥 Carga Masiva (Formato MSI-FOR-TT-010)", 
         "🏷️ Regularizar Piezas y Generar QR",
         "🗑️ Bajas e Inventario Dañado",
         "💾 Respaldos y Exportación"
     ])
 
     # ---------------------------------------------------------
-    # PESTAÑA 1: CARGA MASIVA DE CATÁLOGO UNIVERSAL
+    # PESTAÑA 1: CARGA MASIVA ESPECÍFICA PARA FORMATO MENDOZA
     # ---------------------------------------------------------
     with tab_carga:
-        st.markdown("#### 📥 Cargar / Actualizar Catálogo Maestro desde Excel")
-        st.caption("Suba el archivo de inventario (`.xlsx` o `.xlsm`). El sistema escaneará todas las pestañas automáticamente.")
+        st.markdown("#### 📥 Cargar Catálogo Maestro (Formato MSI-FOR-TT-010)")
+        st.caption("Suba el libro Excel de inventario oficial. Se procesarán las 9 pestañas de categorías automáticamente.")
         
-        archivo_subido = st.file_uploader("Subir Archivo Excel Mendoza:", type=["xlsx", "xlsm"])
+        archivo_subido = st.file_uploader("Subir Archivo Excel Mendoza (.xlsx / .xlsm):", type=["xlsx", "xlsm"])
         
-        if archivo_subido is not None and st.button("🚀 Iniciar Carga Masiva Universal", use_container_width=True):
+        if archivo_subido is not None and st.button("🚀 Iniciar Carga Masiva de Herramientas", use_container_width=True):
             try:
                 excel_file = pd.ExcelFile(archivo_subido)
                 piezas_cargadas = 0
@@ -67,10 +77,11 @@ if clave_acceso == "MENDOZA2026":
                     
                     for sheet in excel_file.sheet_names:
                         sheet_upper = sheet.upper().strip()
+                        # Omitir carátula
                         if "INDICE" in sheet_upper or "ÍNDICE" in sheet_upper: 
                             continue
                             
-                        # Determinar categoría según el nombre de la pestaña
+                        # Determinar categoría exacta por pestaña
                         if "CONECTOR" in sheet_upper: cat = "Conectores"
                         elif "TROMPO" in sheet_upper: cat = "Trompos difusores"
                         elif "COMBINAC" in sheet_upper: cat = "Combinaciones"
@@ -80,49 +91,52 @@ if clave_acceso == "MENDOZA2026":
                         elif "CENTRADOR" in sheet_upper or "CORTA" in sheet_upper: cat = "Centradores y cortatubos"
                         elif "MOTOR" in sheet_upper: cat = "Motores"
                         elif "MARTILLO" in sheet_upper: cat = "Martillos de pesca"
-                        else: cat = "Herramientas varias"
+                        else: cat = sheet.strip()
 
-                        # Leer toda la hoja sin asumir nombres de columna predefinidos
-                        df_raw = pd.read_excel(archivo_subido, sheet_name=sheet, header=None)
-                        conteo_hoja = 0
+                        # Leer desde la Fila 4 de Excel (skiprows=3) donde están "No SERIE" y "HERRAMIENTA"
+                        df_sheet = pd.read_excel(archivo_subido, sheet_name=sheet, skiprows=3)
+                        
+                        # Limpiar espacios en nombres de columnas
+                        df_sheet.columns = [str(c).strip() for c in df_sheet.columns]
+                        
+                        # Buscar las columnas A y B sin importar diferencias de mayúsculas/minúsculas
+                        col_s = [c for c in df_sheet.columns if "SERIE" in c.upper() or "NO." in c.upper()]
+                        col_h = [c for c in df_sheet.columns if "HERRAMIENTA" in c.upper() or "DESCRIPCION" in c.upper()]
 
-                        # Recorrer todas las filas buscando la columna con números de serie y descripción
-                        for row_idx, row in df_raw.iterrows():
-                            row_vals = [str(val).strip() for val in row.values if pd.notnull(val)]
+                        if col_s and col_h:
+                            col_serie_name = col_s[0]
+                            col_herram_name = col_h[0]
                             
-                            # Si la fila tiene al menos 2 celdas con texto
-                            if len(row_vals) >= 2:
-                                val_s = row_vals[0]
-                                val_h = row_vals[1]
-
-                                # Descartar encabezados comunes
-                                if any(kw in val_s.upper() for kw in ["SERIE", "NO.", "CODIGO", "ID", "SISTEMA", "MENDOZA", "S.A.", "FORMATO", "PÁGINA", "FECHA"]):
-                                    continue
-                                if any(kw in val_h.upper() for kw in ["HERRAMIENTA", "DESCRIPCIÓN", "DESCRIPCION", "CANTIDAD", "UBICACIÓN"]):
-                                    continue
+                            df_clean = df_sheet.dropna(subset=[col_serie_name])
+                            conteo_hoja = 0
+                            
+                            for _, row in df_clean.iterrows():
+                                serie = str(row[col_serie_name]).strip()
+                                herramienta = str(row[col_herram_name]).strip()
                                 
-                                # Si la serie tiene una longitud lógica
-                                if len(val_s) >= 2 and val_s.upper() not in ["NAN", "NONE", "N/A"]:
-                                    cursor.execute('''
-                                        INSERT OR REPLACE INTO inventario (id, descripcion, cantidad, ubicacion, categoria, horas_uso, stock) 
-                                        VALUES (?, ?, 1, 'Taller Principal', ?, 0.0, 1)
-                                    ''', (val_s, val_h, cat))
-                                    conteo_hoja += 1
-                                    piezas_cargadas += 1
+                                # Omitir subtítulos de sistemas o celdas nulas
+                                if not serie or serie.upper() in ["NAN", "NONE", "N/A", ""] or "SISTEMA" in serie.upper() or len(serie) < 2:
+                                    continue
+                                if not herramienta or herramienta.upper() in ["NAN", "NONE", "N/A", ""]:
+                                    continue
 
-                        if conteo_hoja > 0:
-                            resumen_hojas.append(f"🟢 **Pestaña '{sheet}'**: Se cargaron **{conteo_hoja}** piezas ({cat}).")
+                                cursor.execute('''
+                                    INSERT OR REPLACE INTO inventario (id, descripcion, cantidad, ubicacion, categoria, horas_uso, stock) 
+                                    VALUES (?, ?, 1, 'Taller Principal', ?, 0.0, 1)
+                                ''', (serie, herramienta, cat))
+                                
+                                conteo_hoja += 1
+                                piezas_cargadas += 1
+
+                            resumen_hojas.append(f"🟢 **Pestaña '{sheet}'**: **{conteo_hoja}** herramientas cargadas ({cat}).")
                         else:
-                            resumen_hojas.append(f"⚠️ **Pestaña '{sheet}'**: No se detectaron registros válidos.")
+                            resumen_hojas.append(f"⚠️ **Pestaña '{sheet}'**: No se encontraron las columnas 'No SERIE' y 'HERRAMIENTA' en la fila 4.")
 
                     conn.commit()
 
-                if piezas_cargadas > 0:
-                    st.success(f"🎉 ¡Éxito! Se registraron **{piezas_cargadas}** herramientas en la base de datos.")
-                else:
-                    st.warning("⚠️ El proceso finalizó pero no se detectaron filas válidas. Revisa el resumen por pestaña abajo.")
-
-                with st.expander("📋 Ver Detalle por Pestaña del Excel", expanded=True):
+                st.success(f"🎉 ¡Proceso Exitoso! Se registraron correctamente **{piezas_cargadas}** herramientas en el catálogo.")
+                
+                with st.expander("📋 Ver Desglose por Categoría", expanded=True):
                     for msg in resumen_hojas:
                         st.markdown(msg)
 
