@@ -13,7 +13,9 @@ from reportlab.lib import colors
 st.set_page_config(page_title="MSH-TT-FOR-001 - Salida de Herramientas", layout="wide")
 
 def conectar_db(): 
-    return sqlite3.connect('inventario_thrutubing.db')
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
+    return sqlite3.connect(db_path)
 
 with conectar_db() as conn:
     cursor = conn.cursor()
@@ -158,7 +160,6 @@ def generar_pdf_oficial_mendoza(folio, cliente, depto, realiza_sol, campo, pozo,
 
     # 5. CÁLCULO DE ESPACIO PARA EMPUJAR LAS FIRMAS HASTA ABAJO (AL PIE DE LA PÁGINA)
     num_filas_piezas = len(df_carrito)
-    # Altura estándar de la hoja = 792 pt. Le restamos los elementos superiores y el cuadro de firmas
     espacio_firmas_pie = max(20, 480 - (num_filas_piezas * 22))
     story.append(Spacer(1, espacio_firmas_pie))
 
