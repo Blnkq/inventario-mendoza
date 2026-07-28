@@ -28,9 +28,12 @@ with conectar_db() as conn:
             stock INTEGER DEFAULT 1
         )
     ''')
-    # Verificar si faltan columnas acumulativas por esquemas anteriores
+    # Verificar y agregar columnas si la tabla venía de una versión anterior
     cursor.execute("PRAGMA table_info(inventario)")
     cols = [col[1] for col in cursor.fetchall()]
+    
+    if 'cantidad' not in cols:
+        cursor.execute("ALTER TABLE inventario ADD COLUMN cantidad INTEGER DEFAULT 1")
     if 'horas_uso' not in cols:
         cursor.execute("ALTER TABLE inventario ADD COLUMN horas_uso REAL DEFAULT 0.0")
     if 'stock' not in cols:
@@ -121,7 +124,10 @@ if clave_acceso == "MENDOZA2026":
                                 if not herramienta or herramienta.upper() in ["NAN", "NONE", "N/A", ""]:
                                     continue
 
-                                cursor.execute("INSERT OR REPLACE INTO inventario (id, descripcion, cantidad, ubicacion, categoria, horas_uso, stock) VALUES (?, ?, 1, 'Taller Principal', ?, 0.0, 1)", (serie, herramienta, cat))
+                                cursor.execute('''
+                                    INSERT OR REPLACE INTO inventario (id, descripcion, cantidad, ubicacion, categoria, horas_uso, stock) 
+                                    VALUES (?, ?, 1, 'Taller Principal', ?, 0.0, 1)
+                                ''', (serie, herramienta, cat))
                                 conteo_hoja += 1
                                 piezas_cargadas += 1
 
