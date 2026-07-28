@@ -3,11 +3,14 @@ import sqlite3
 import pandas as pd
 from datetime import datetime
 import io
+import os
 
 st.set_page_config(page_title="Bitácora Histórica", layout="wide")
 
 def conectar_db(): 
-    return sqlite3.connect('inventario_thrutubing.db')
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
+    return sqlite3.connect(db_path)
 
 st.markdown("### 📋 Auditoría e Historial Analítico de Movimientos (Taller y Pozo)")
 st.markdown("Registro unificado de folios oficiales de despacho (FOR-001) y retornos de herramientas (FOR-002).")
@@ -24,7 +27,7 @@ with conectar_db() as conn:
                h.observaciones AS [DETALLES / OBSERVACIONES]
         FROM historial h 
         JOIN inventario i ON h.id_pieza = i.id 
-        ORDER BY h.id_movimiento DESC
+        ORDER BY h.id_historial DESC
     ''', conn)
 
 if df_hist.empty:
