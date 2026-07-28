@@ -2,17 +2,20 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
+import os
 
 st.set_page_config(page_title="Trazabilidad e Inspección NDT - Motores", layout="wide")
 
 def conectar_db(): 
-    return sqlite3.connect('inventario_thrutubing.db')
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
+    return sqlite3.connect(db_path)
 
 # --- INICIALIZACIÓN DE TABLAS (TRAZABILIDAD + NDT) ---
 with conectar_db() as conn:
     cursor = conn.cursor()
     
-    # Tablas de Trazabilidad y Corridas (Código Existente)
+    # Tablas de Trazabilidad y Corridas
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS motores_trazabilidad (
             id_motor TEXT PRIMARY KEY,
