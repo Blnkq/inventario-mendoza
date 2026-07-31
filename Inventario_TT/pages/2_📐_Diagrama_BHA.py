@@ -5,11 +5,12 @@ from datetime import datetime
 import io
 import os
 
-# Importaciones de ReportLab para el PDF del Diagrama BHA
+# Importaciones de ReportLab (incluyendo el motor gráfico de dibujo vectorial)
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
+from reportlab.graphics.shapes import Drawing, Rect, String, Line, Group
 
 st.set_page_config(page_title="MSH-TT-FOR-004 - Diagrama BHA", layout="wide")
 
@@ -18,7 +19,56 @@ def conectar_db():
     db_path = os.path.join(base_dir, 'inventario_thrutubing.db')
     return sqlite3.connect(db_path)
 
-# --- GENERADOR DE PDF (FORMATO MSH-TT-FOR-004) ---
+# --- FUNCIÓN PARA DIBUJAR EL BHA ESQUEMÁTICO EN VECTORIAL ---
+def crear_esquema_vectorial_bha(df_bha):
+    num_piezas = len(df_bha)
+    alto_pieza = 28
+    alto_total_drawing = max(120, num_piezas * alto_pieza + 40)
+    
+    d = Drawing(500, alto_total_drawing)
+    
+    # Línea de centro / Eje de la sarta (punteada)
+    eje_x = 140
+    d.add(Line(eje_x, 10, eje_x, alto_total_drawing - 10, strokeDashArray=[3, 3], strokeColor=colors.HexColor("#777777"), strokeWidth=1))
+    
+    y_actual = alto_total_drawing - 30
+
+    for idx, row in df_bha.iterrows():
+        # Representación según tipo de herramienta
+        ancho_bloque = 50
+        fill_color = colors.HexColor("#0f3460")
+        
+        tipo_lower = str(row["TIPO DE HERRAMIENTA"]).lower()
+        if "motor" in tipo_lower:
+            ancho_bloque = 42
+            fill_color = colors.HexColor("#16213e")
+        elif "molino" in tipo_lower or "zapata" in tipo_lower:
+            ancho_bloque = 60
+            fill_color = colors.HexColor("#e94560")
+        elif "conector" in tipo_lower:
+            ancho_bloque = 46
+            fill_color = colors.HexColor("#533483")
+
+        x_bloque = eje_x - (ancho_bloque / 2)
+        
+        # Bloque físico de la herramienta
+        d.add(Rect(x_bloque, y_actual - alto_pieza + 5, ancho_bloque, alto_pieza - 5, fillColor=fill_color, strokeColor=colors.black, strokeWidth=1, rx=2, ry=2))
+        
+        # Rosca / Acople de unión
+        d.add(Rect(eje_x - 10, y_actual - alto_pieza, 20, 5, fillColor=colors.HexColor("#cccccc"), strokeColor=colors.black, strokeWidth=0.5))
+
+        # Texto indicador a la derecha (PDA, Tipo, Serie y OD)
+        label_txt = f"PDA {row['No.']}: {row['NO. SERIE']} — {row['TIPO DE HERRAMIENTA']} (OD: {row['OD']})"
+        d.add(String(eje_x + (ancho_bloque / 2) + 15, y_actual - (alto_pieza / 2) - 2, label_txt, fontName="Helvetica-Bold", fontSize=8, fillColor=colors.HexColor("#222222")))
+        
+        # Cota de longitud a la izquierda
+        d.add(String(20, y_actual - (alto_pieza / 2) - 2, f"L: {row['LONGITUD']}", fontName="Helvetica", fontSize=8, fillColor=colors.HexColor("#555555")))
+
+        y_actual -= alto_pieza
+
+    return d
+
+# --- GENERADOR DE PDF (FORMATO MSH-TT-FOR-004 CON DIAGRAMA) ---
 def generar_pdf_bha(folio, cliente, campo, pozo, operador, operacion_txt, df_bha, long_total, prueba_tension, prueba_hermeticidad, pruebas_motor):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -37,29 +87,36 @@ def generar_pdf_bha(folio, cliente, campo, pozo, operador, operacion_txt, df_bha
     style_cell = ParagraphStyle('Cell', fontName='Helvetica', fontSize=8, leading=10, alignment=1)
     style_cell_bold = ParagraphStyle('CellB', fontName='Helvetica-Bold', fontSize=8, leading=10, alignment=1)
 
-    # Encabezado
+    # 1. Encabezado
     story.append(Paragraph("MENDOZA SERVICIOS Y HERRAMIENTAS S.A. DE C.V.", style_titulo))
     story.append(Paragraph("DIVISIÓN THRU-TUBING & HERRAMIENTAS DE FONDO", style_sub))
     story.append(Paragraph("<b>FORMATO MSH-TT-FOR-004 — DIAGRAMA DE HERRAMIENTAS BHA</b>", style_sub))
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 8))
 
-    # Header Datos
+    # 2. Header Datos
     datos_h = [
         [Paragraph("<b>CLIENTE:</b>", style_cell_bold), Paragraph(str(cliente), style_cell), Paragraph("<b>CAMPO / POZO:</b>", style_cell_bold), Paragraph(f"{campo} / {pozo}", style_cell)],
         [Paragraph("<b>OPERACIÓN:</b>", style_cell_bold), Paragraph(str(operacion_txt), style_cell), Paragraph("<b>FECHA:</b>", style_cell_bold), Paragraph(datetime.now().strftime("%d/%m/%Y"), style_cell)],
         [Paragraph("<b>PREPARADO POR:</b>", style_cell_bold), Paragraph(str(operador), style_cell), Paragraph("<b>FOLIO:</b>", style_cell_bold), Paragraph(str(folio), style_cell)]
     ]
-    t_h = Table(datos_h, colWidths=[100, 180, 100, 170])
+    t_h = Table(datos_h, colWidths=[90, 180, 90, 190])
     t_h.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#f8f9fa")),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
     ]))
     story.append(t_h)
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 10))
 
-    # Tabla de Piezas del BHA
-    story.append(Paragraph("<b>COMPONENETES Y DIMENSIONES DEL BHA (SARTA DE FONDO):</b>", style_cell_bold))
+    # 3. DIAGRAMA ESQUEMÁTICO VECTORIAL (DIBUJO AUTOMÁTICO)
+    story.append(Paragraph("<b>ESQUEMA VISUAL DE LA SARTA (BHA):</b>", style_cell_bold))
+    story.append(Spacer(1, 4))
+    drawing_bha = crear_esquema_vectorial_bha(df_bha)
+    story.append(drawing_bha)
+    story.append(Spacer(1, 10))
+
+    # 4. Tabla de Piezas del BHA
+    story.append(Paragraph("<b>COMPONENETES Y DIMENSIONES DETALLADAS:</b>", style_cell_bold))
     story.append(Spacer(1, 4))
 
     tabla_bha = [[
@@ -85,24 +142,24 @@ def generar_pdf_bha(folio, cliente, campo, pozo, operador, operacion_txt, df_bha
             Paragraph(str(row["NO. SERIE"]), style_cell)
         ])
 
-    t_bha = Table(tabla_bha, colWidths=[25, 150, 45, 45, 60, 70, 75, 80])
+    t_bha = Table(tabla_bha, colWidths=[25, 145, 45, 45, 60, 70, 80, 80])
     t_bha.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0f3460")),
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#0f3460")),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('TOPPADDING', (0,0), (-1,-1), 4),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
     ]))
     story.append(t_bha)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
     # Total Longitud
-    story.append(Paragraph(f"<b>LONGITUD TOTAL BHA: {long_total:.2f} MTS</b>", ParagraphStyle('LT', fontName='Helvetica-Bold', fontSize=10, alignment=2, textColor=colors.HexColor("#0f3460"))))
-    story.append(Spacer(1, 10))
+    story.append(Paragraph(f"<b>LONGITUD TOTAL BHA: {long_total:.2f} MTS</b>", ParagraphStyle('LT', fontName='Helvetica-Bold', fontSize=9, alignment=2, textColor=colors.HexColor("#0f3460"))))
+    story.append(Spacer(1, 8))
 
-    # Pruebas Operativas
-    story.append(Paragraph("<b>REGISTRO DE PRUEBAS OPERATIVAS EN SUPERFICIE:</b>", style_cell_bold))
+    # 5. Pruebas Operativas
+    story.append(Paragraph("<b>PRUEBAS OPERATIVAS EN SUPERFICIE:</b>", style_cell_bold))
     story.append(Spacer(1, 4))
 
     p_datos = [
@@ -110,16 +167,18 @@ def generar_pdf_bha(folio, cliente, campo, pozo, operador, operacion_txt, df_bha
         [Paragraph("<b>PRUEBA DE HERMETICIDAD:</b>", style_cell_bold), Paragraph(f"{prueba_hermeticidad} PSI", style_cell)],
         [Paragraph("<b>PRUEBA DE MOTOR (BPM vs PSI):</b>", style_cell_bold), Paragraph(pruebas_motor, style_cell)]
     ]
-    t_p = Table(p_datos, colWidths=[160, 390])
+    t_p = Table(p_datos, colWidths=[150, 400])
     t_p.setStyle(TableStyle([
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")),
         ('BACKGROUND', (0,0), (0,-1), colors.HexColor("#f8f9fa")),
         ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
     ]))
     story.append(t_p)
-    story.append(Spacer(1, 30))
+    story.append(Spacer(1, 20))
 
-    # Firmas
+    # 6. Firmas
     firmas = [
         ["_______________________________________", "_______________________________________"],
         ["ELABORÓ (OPERADOR MENDOZA)", "REVISÓ / CLIENTE (SUPERVISOR)"],
@@ -223,7 +282,7 @@ else:
             prueba_motor = st.text_area("Prueba de Motor (Gasto vs Presión):", value="1 BPM - 4,600 PSI | 3/4 BPM - 3,700 PSI | 1/2 BPM - 2,500 PSI | 1/4 BPM - 1,300 PSI")
 
         st.markdown("---")
-        if st.button("📄 Generar Formato MSH-TT-FOR-004 (PDF)", type="primary", use_container_width=True):
+        if st.button("📄 Generar Formato MSH-TT-FOR-004 con Diagrama (PDF)", type="primary", use_container_width=True):
             pdf_bha = generar_pdf_bha(
                 folio_bha, cliente_bha, campo_bha, pozo_bha, operador_bha, 
                 operacion_txt, df_bha_preview, longitud_total, prueba_tension, 
