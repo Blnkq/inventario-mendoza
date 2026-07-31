@@ -158,9 +158,9 @@ def generar_pdf_remision_retorno(folio, cliente, campo, pozo, ingeniero, df_carr
     buffer.seek(0)
     return buffer
 
-# Cargar piezas que están fuera del taller (stock = 0)
+# Cargar piezas que están fuera del taller (stock = 0 o ubicación distinta a Taller Principal)
 with conectar_db() as conn:
-    df_inv = pd.read_sql_query("SELECT id AS [No SERIE], descripcion AS [HERRAMIENTA], stock AS [STOCK] FROM inventario WHERE stock = 0", conn)
+    df_inv = pd.read_sql_query("SELECT id AS [No SERIE], descripcion AS [HERRAMIENTA], stock AS [STOCK], ubicacion AS [UBICACION] FROM inventario WHERE stock = 0 OR ubicacion NOT LIKE '%Taller Principal%'", conn)
 
 st.title("Mendoza Servicios e Herramientas")
 st.subheader("Formato: MSH-TT-FOR-002 — Retorno de Herramientas (Entrada al Taller)")
@@ -190,8 +190,8 @@ else:
     if "carrito_retorno" not in st.session_state:
         st.session_state.carrito_retorno = []
 
-    # Selector de piezas (Solo mostrará las que están en pozo / stock = 0)
-    lista_opciones = [f"{row['No SERIE']} - {row['HERRAMIENTA']} (En Pozo)" for _, row in df_inv.iterrows()]
+    # Selector de piezas (Solo mostrará las que están en pozo / fuera del taller)
+    lista_opciones = [f"{row['No SERIE']} - {row['HERRAMIENTA']} ({row['UBICACION']})" for _, row in df_inv.iterrows()]
     
     col_sel, col_btn = st.columns([3, 1])
     with col_sel:
@@ -227,8 +227,8 @@ else:
 
         st.markdown("---")
         
-        # 3. PROCESAMIENTO Y ACTUALIZACIÓN EN LOTE (SUMAR AL STOCK)
-        if st.button("💾 Procesar Entrada y Aumentar Stock", type="primary", use_container_width=True):
+        # 3. PROCESAMIENTO Y ACTUALIZACIÓN EN LOTE (REINGRESO A TALLER PRINCIPAL)
+        if st.button("💾 Procesar Entrada y Reingresar a Taller", type="primary", use_container_width=True):
             if not ingeniero.strip():
                 st.error("❌ No se puede procesar: Debe especificar quién recibe el equipo.")
             elif not folio_doc.strip():
@@ -247,19 +247,19 @@ else:
                         # Procesar lote
                         fecha_hora_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         for item in st.session_state.carrito_retorno:
-                            # Reingresar a stock (1 = En Taller Principal) y actualizar ubicación
+                            # Reingresar a stock (1) y forzar ubicación a 'Taller Principal'
                             cursor.execute("UPDATE inventario SET stock = 1, ubicacion = 'Taller Principal' WHERE id = ?", (item["No SERIE"],))
                             
                             # Asentar en Bitácora general
-                            obs_detalle = f"Retorno de Pozo Folio: {folio_doc}. Pozo: {pozo}. Campo: {campo}."
+                            obs_detalle = f"Retorno de Pozo Folio: {folio_doc}. Pozo: {pozo}. Campo: {campo}. Reingreso a Base."
                             cursor.execute('''
                                 INSERT INTO historial (fecha_hora, id_pieza, tipo_movimiento, cantidad, operador, observaciones)
-                                VALUES (?, ?, 'Entrada (Retorno de Pozo / Compra)', 1, ?, ?)
+                                VALUES (?, ?, 'Entrada (Retorno de Pozo)', 1, ?, ?)
                             ''', (fecha_hora_actual, item["No SERIE"], ingeniero.strip(), obs_detalle))
                             
                         conn.commit()
                         
-                    st.success(f"🎉 ¡Éxito! El documento de retorno {folio_doc} ha sido registrado e ingresado al taller.")
+                    st.success(f"🎉 ¡Éxito! El documento de retorno {folio_doc} ha sido registrado y las piezas reingresaron al Taller Principal.")
                     
                     # Generar PDF oficial MSH-TT-FOR-002
                     pdf_bytes = generar_pdf_remision_retorno(folio_doc.strip(), cliente.strip(), campo.strip(), pozo.strip(), ingeniero.strip(), df_carrito)
