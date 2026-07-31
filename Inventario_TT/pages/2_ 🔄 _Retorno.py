@@ -158,9 +158,13 @@ def generar_pdf_remision_retorno(folio, cliente, campo, pozo, ingeniero, df_carr
     buffer.seek(0)
     return buffer
 
-# Cargar piezas que están fuera del taller (stock = 0 o ubicación distinta a Taller Principal)
+# Cargar ÚNICAMENTE las herramientas que están fuera del Taller (stock = 0 y ubicación distinta de Taller Principal)
 with conectar_db() as conn:
-    df_inv = pd.read_sql_query("SELECT id AS [No SERIE], descripcion AS [HERRAMIENTA], stock AS [STOCK], ubicacion AS [UBICACION] FROM inventario WHERE stock = 0 OR ubicacion NOT LIKE '%Taller Principal%'", conn)
+    df_inv = pd.read_sql_query("""
+        SELECT id AS [No SERIE], descripcion AS [HERRAMIENTA], stock AS [STOCK], ubicacion AS [UBICACION] 
+        FROM inventario 
+        WHERE stock = 0 AND TRIM(ubicacion) != 'Taller Principal'
+    """, conn)
 
 st.title("Mendoza Servicios e Herramientas")
 st.subheader("Formato: MSH-TT-FOR-002 — Retorno de Herramientas (Entrada al Taller)")
@@ -190,7 +194,7 @@ else:
     if "carrito_retorno" not in st.session_state:
         st.session_state.carrito_retorno = []
 
-    # Selector de piezas (Solo mostrará las que están en pozo / fuera del taller)
+    # Selector de piezas (Solo mostrará las que están fuera de taller)
     lista_opciones = [f"{row['No SERIE']} - {row['HERRAMIENTA']} ({row['UBICACION']})" for _, row in df_inv.iterrows()]
     
     col_sel, col_btn = st.columns([3, 1])
