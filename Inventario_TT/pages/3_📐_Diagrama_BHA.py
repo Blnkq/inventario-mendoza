@@ -138,13 +138,14 @@ st.title("Mendoza Servicios e Herramientas")
 st.subheader("Formato MSH-TT-FOR-004 — Diagrama de Herramientas BHA")
 st.markdown("---")
 
-# Cargar inventario
+# Cargar ÚNICAMENTE las herramientas que salieron a pozo (stock = 0 y fuera de Taller Principal)
 with conectar_db() as conn:
-    df_inv = pd.read_sql_query("SELECT id AS [SERIE], descripcion AS [HERRAMIENTA] FROM inventario", conn)
+    df_inv = pd.read_sql_query("""
+        SELECT id AS [SERIE], descripcion AS [HERRAMIENTA], ubicacion AS [UBICACION] 
+        FROM inventario 
+        WHERE stock = 0 AND TRIM(ubicacion) != 'Taller Principal'
+    """, conn)
 
-lista_series = ["-- Seleccionar --"] + [f"{row['SERIE']} - {row['HERRAMIENTA']}" for _, row in df_inv.iterrows()]
-
-# 1. Datos Generales
 st.markdown("#### 📝 Datos Generales del Pozo y Operación")
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -160,73 +161,78 @@ with c3:
 st.markdown("---")
 st.markdown("#### 🧩 Ensamblado del BHA (Sarta de Fondo)")
 
-if "lista_bha" not in st.session_state:
-    st.session_state.lista_bha = []
+if df_inv.empty:
+    st.warning("⚠️ **No hay herramientas registradas en pozo/campo.** Primero debes registrar una salida a pozo desde el módulo **Movimientos (MSH-TT-FOR-001)** para poder armar el BHA.")
+else:
+    lista_series = ["-- Seleccionar --"] + [f"{row['SERIE']} - {row['HERRAMIENTA']} ({row['UBICACION']})" for _, row in df_inv.iterrows()]
 
-with st.expander("➕ Agregar Componente al BHA", expanded=True):
-    col_a, col_b, col_c = st.columns([2, 1, 1])
-    with col_a:
-        herramienta_sel = st.selectbox("Seleccionar Herramienta de Inventario:", lista_series)
-        tipo_componente = st.text_input("Tipo / Descripción Técnica BHA:", placeholder="Ej. CONECTOR EZ DOBLE CUÑAS DE 2 1/8")
-    with col_b:
-        od_val = st.text_input("O.D. (Pulgadas):", value="2 1/8\"")
-        id_val = st.text_input("I.D. (Pulgadas):", value="3/4\"")
-        long_val = st.number_input("Longitud (Metros):", min_value=0.0, step=0.1, value=0.30)
-    with col_c:
-        cuello_val = st.text_input("Cuello de Pesca:", value="2 1/8\"")
-        conexion_val = st.text_input("Conexión:", value="1 1/2\" AMT")
-        
-    if st.button("➕ Añadir Herramienta al Diagrama", use_container_width=True):
-        if herramienta_sel != "-- Seleccionar --" and tipo_componente.strip():
-            serie_ext = herramienta_sel.split(" - ")[0]
-            num_item = len(st.session_state.lista_bha) + 1
-            st.session_state.lista_bha.append({
-                "No.": num_item,
-                "TIPO DE HERRAMIENTA": tipo_componente.strip(),
-                "OD": od_val,
-                "ID": id_val,
-                "LONGITUD": f"{long_val:.2f} MTS",
-                "LONG_NUM": long_val,
-                "CUELLO": cuello_val,
-                "CONEXION": conexion_val,
-                "NO. SERIE": serie_ext
-            })
-            st.success("✅ Componente añadido.")
+    if "lista_bha" not in st.session_state:
+        st.session_state.lista_bha = []
+
+    with st.expander("➕ Agregar Componente al BHA", expanded=True):
+        col_a, col_b, col_c = st.columns([2, 1, 1])
+        with col_a:
+            herramienta_sel = st.selectbox("Seleccionar Herramienta (Solo en Pozo):", lista_series)
+            tipo_componente = st.text_input("Tipo / Descripción Técnica BHA:", placeholder="Ej. CONECTOR EZ DOBLE CUÑAS DE 2 1/8")
+        with col_b:
+            od_val = st.text_input("O.D. (Pulgadas):", value="2 1/8\"")
+            id_val = st.text_input("I.D. (Pulgadas):", value="3/4\"")
+            long_val = st.number_input("Longitud (Metros):", min_value=0.0, step=0.1, value=0.30)
+        with col_c:
+            cuello_val = st.text_input("Cuello de Pesca:", value="2 1/8\"")
+            conexion_val = st.text_input("Conexión:", value="1 1/2\" AMT")
+            
+        if st.button("➕ Añadir Herramienta al Diagrama", use_container_width=True):
+            if herramienta_sel != "-- Seleccionar --" and tipo_componente.strip():
+                serie_ext = herramienta_sel.split(" - ")[0]
+                num_item = len(st.session_state.lista_bha) + 1
+                st.session_state.lista_bha.append({
+                    "No.": num_item,
+                    "TIPO DE HERRAMIENTA": tipo_componente.strip(),
+                    "OD": od_val,
+                    "ID": id_val,
+                    "LONGITUD": f"{long_val:.2f} MTS",
+                    "LONG_NUM": long_val,
+                    "CUELLO": cuello_val,
+                    "CONEXION": conexion_val,
+                    "NO. SERIE": serie_ext
+                })
+                st.success("✅ Componente añadido.")
+                st.rerun()
+
+    # Vista previa
+    if st.session_state.lista_bha:
+        df_bha_preview = pd.DataFrame(st.session_state.lista_bha)
+        st.markdown("##### **Sarta de Fondo Configurada:**")
+        st.dataframe(df_bha_preview.drop(columns=["LONG_NUM"]), use_container_width=True, hide_index=True)
+
+        longitud_total = sum([item["LONG_NUM"] for item in st.session_state.lista_bha])
+        st.info(f"📏 **LONGITUD TOTAL DEL BHA:** `{longitud_total:.2f} Metros`")
+
+        if st.button("🗑️ Vaciar Sarta BHA"):
+            st.session_state.lista_bha = []
             st.rerun()
 
-# Vista previa
-if st.session_state.lista_bha:
-    df_bha_preview = pd.DataFrame(st.session_state.lista_bha)
-    st.markdown("##### **Sarta de Fondo Configurada:**")
-    st.dataframe(df_bha_preview.drop(columns=["LONG_NUM"]), use_container_width=True, hide_index=True)
+        st.markdown("---")
+        st.markdown("#### 🧪 Registro de Pruebas en Superficie")
+        p1, p2 = st.columns(2)
+        with p1:
+            prueba_tension = st.text_input("Prueba de Tensión (Lbs):", value="25,000")
+            prueba_hermeticidad = st.text_input("Prueba de Hermeticidad (PSI):", value="5,500")
+        with p2:
+            prueba_motor = st.text_area("Prueba de Motor (Gasto vs Presión):", value="1 BPM - 4,600 PSI | 3/4 BPM - 3,700 PSI | 1/2 BPM - 2,500 PSI | 1/4 BPM - 1,300 PSI")
 
-    longitud_total = sum([item["LONG_NUM"] for item in st.session_state.lista_bha])
-    st.info(f"📏 **LONGITUD TOTAL DEL BHA:** `{longitud_total:.2f} Metros`")
-
-    if st.button("🗑️ Vaciar Sarta BHA"):
-        st.session_state.lista_bha = []
-        st.rerun()
-
-    st.markdown("---")
-    st.markdown("#### 🧪 Registro de Pruebas en Superficie")
-    p1, p2 = st.columns(2)
-    with p1:
-        prueba_tension = st.text_input("Prueba de Tensión (Lbs):", value="25,000")
-        prueba_hermeticidad = st.text_input("Prueba de Hermeticidad (PSI):", value="5,500")
-    with p2:
-        prueba_motor = st.text_area("Prueba de Motor (Gasto vs Presión):", value="1 BPM - 4,600 PSI | 3/4 BPM - 3,700 PSI | 1/2 BPM - 2,500 PSI | 1/4 BPM - 1,300 PSI")
-
-    st.markdown("---")
-    if st.button("📄 Generar Formato MSH-TT-FOR-004 (PDF)", type="primary", use_container_width=True):
-        pdf_bha = generar_pdf_bha(
-            folio_bha, cliente_bha, campo_bha, pozo_bha, operador_bha, 
-            operacion_txt, df_bha_preview, longitud_total, prueba_tension, 
-            prueba_hermeticidad, prueba_motor
-        )
-        st.download_button(
-            label="📥 DESCARGAR DIAGRAMA BHA (FOR-004 PDF)",
-            data=pdf_bha,
-            file_name=f"{folio_bha}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
+        st.markdown("---")
+        if st.button("📄 Generar Formato MSH-TT-FOR-004 (PDF)", type="primary", use_container_width=True):
+            pdf_bha = generar_pdf_bha(
+                folio_bha, cliente_bha, campo_bha, pozo_bha, operador_bha, 
+                operacion_txt, df_bha_preview, longitud_total, prueba_tension, 
+                prueba_hermeticidad, prueba_motor
+            )
+            st.download_button(
+                label="📥 DESCARGAR DIAGRAMA BHA (FOR-004 PDF)",
+                data=pdf_bha,
+                file_name=f"{folio_bha}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
